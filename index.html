@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wiki Docs</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2563eb">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
 :root{--bg:#fff;--bg2:#f6f7f9;--bg3:#eceef2;--fg:#1f2328;--mut:#6b7280;--bd:#d9dde3;--acc:#2563eb;--accbg:#e8f0fe;--danger:#dc2626;--mark:#fff3a3;--code:#f1f3f5;--sw:300px}
 @media(prefers-color-scheme:dark){:root{--bg:#16181d;--bg2:#1d2027;--bg3:#272b33;--fg:#e6e8eb;--mut:#9aa3af;--bd:#343a44;--acc:#6ea0ff;--accbg:#22314f;--danger:#f87171;--mark:#6b5d00;--code:#262a31}}
@@ -25,6 +31,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-off
 #top b{font-size:15px}
 #rootName{color:var(--mut)}
 #status{color:var(--mut);font-size:12px}
+.ver{color:var(--mut);font-size:11px;opacity:.8}
+.md input[data-cb]{cursor:pointer}
+.prog{display:inline-flex;align-items:center;gap:8px;vertical-align:middle}
+.prog .bar{display:inline-block;width:160px;height:8px;border-radius:4px;background:var(--bg3);overflow:hidden}
+.prog .bar i{display:block;height:100%;background:var(--acc)}
 
 #app{flex:1;display:flex;min-height:0}
 #side{width:var(--sw);min-width:200px;max-width:60vw;display:flex;flex-direction:column;border-right:1px solid var(--bd);background:var(--bg2)}
@@ -160,12 +171,13 @@ mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
       <button id="wVirtual">Usar espacio del navegador (sin carpeta)</button>
     </div>
     <p id="wNote"></p>
+    <p class="ver">Versión <span class="appver"></span> · <button id="wInstall" hidden>📲 Instalar app</button></p>
     <p><small>Para sincronizar: elige una carpeta dentro de tu Google Drive (escritorio) o de OneDrive. Los cambios se sincronizan solos y la app los detecta al volver a la ventana.</small></p>
   </div>
 </div>
 
 <header id="top">
-  <b>📚 Wiki</b><span id="rootName"></span><span id="status"></span>
+  <b>📚 Wiki</b><span class="ver" title="Versión de la app">v<span class="appver"></span></span><span id="rootName"></span><span id="status"></span>
   <span class="sp"></span>
   <button id="btnRefresh" title="Releer la carpeta (sincronización)">↻ Recargar</button>
   <button id="btnExport" hidden>Exportar copia</button>
@@ -239,6 +251,18 @@ mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
 <input type="file" id="fileImport" accept=".json" hidden>
 
 <script>
+const APP_VERSION='1.1.0';
+document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VERSION);
+if('serviceWorker' in navigator&&location.protocol!=='file:'){
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    reg.addEventListener('updatefound',()=>{const w=reg.installing;w&&w.addEventListener('statechange',()=>{
+      if(w.state==='installed'&&navigator.serviceWorker.controller)toast('Hay una versión nueva de la app: recarga la página para usarla')})});
+  }).catch(()=>{});
+}
+let installEvt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const b=document.getElementById('wInstall');if(b)b.hidden=false});
+window.addEventListener('appinstalled',()=>{installEvt=null;const b=document.getElementById('wInstall');if(b)b.hidden=true});
+document.addEventListener('click',async e=>{if(e.target.id!=='wInstall'||!installEvt)return;installEvt.prompt();await installEvt.userChoice.catch(()=>{});installEvt=null;e.target.hidden=true});
 'use strict';
 const $=s=>document.querySelector(s);
 const ASSETS='_assets';
@@ -284,6 +308,7 @@ function inline(s){
   for(let k=0;k<5&&/\u0001\d+\u0001/.test(s);k++)s=s.replace(/\u0001(\d+)\u0001/g,(m,i)=>st[i]!==undefined?st[i]:m);
   return s;
 }
+let CB_TOP=false;
 function renderItems(kids){
   const j=kids.findIndex(k=>k.ol!==kids[0].ol);
   if(j>0)return renderItems(kids.slice(0,j))+renderItems(kids.slice(j));
@@ -291,7 +316,7 @@ function renderItems(kids){
   const start=tag==='ol'&&kids[0].n>1?` start="${kids[0].n}"`:'';
   return `<${tag}${start}>`+kids.map(k=>{
     let t=k.t,cb='';const tm=t.match(/^\[( |x|X)\]\s+(.*)$/);
-    if(tm){cb=`<input type="checkbox" disabled ${tm[1]!==' '?'checked':''}> `;t=tm[2]}
+    if(tm){cb=`<input type="checkbox" ${CB_TOP?'data-cb':'disabled'} ${tm[1]!==' '?'checked':''}> `;t=tm[2]}
     return `<li>${cb}${inline(t)}${k.kids.length?renderItems(k.kids):''}</li>`;
   }).join('')+`</${tag}>`;
 }
@@ -333,7 +358,7 @@ function renderMD(md,top){
       }
       const root={ind:-1,kids:[]},stack=[root];
       for(const it of items){while(stack.length>1&&stack[stack.length-1].ind>=it.ind)stack.pop();stack[stack.length-1].kids.push(it);stack.push(it)}
-      out.push(renderItems(root.kids));continue;
+      CB_TOP=!!top;out.push(renderItems(root.kids));CB_TOP=false;continue;
     }
     if(l.includes('|')&&i+1<L.length&&L[i+1].includes('|')&&TSEP_RE.test(L[i+1])){
       const t=parseTableAt(L,i);
@@ -986,11 +1011,33 @@ function decorate(root){
     assetURL(src).then(u=>{if(u)im.src=u;else im.classList.add('broken')});
   });
 }
+/* casillas: líneas de origen de cada "- [ ]" de nivel superior (fuera de código y citas) */
+const CB_LINE=/^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\](?=\s)/;
+function checkboxLines(text){
+  const L=text.replace(/\r\n?/g,'\n').split('\n'),res=[];let fenced=false;
+  L.forEach((l,i)=>{if(/^```/.test(l)){fenced=!fenced;return}if(!fenced&&CB_LINE.test(l))res.push(i)});
+  return {L,res};
+}
+/* {{progreso}} → "12 / 100 (12 %)" con barra, contando las casillas de la página */
+function progressHTML(html,text){
+  if(!/\{\{\s*progreso\s*\}\}/i.test(html))return html;
+  const {L,res}=checkboxLines(text),tot=res.length,done=res.filter(i=>L[i].match(CB_LINE)[2]!==' ').length;
+  const pc=tot?Math.round(done*100/tot):0;
+  return html.replace(/\{\{\s*progreso\s*\}\}/gi,`<span class="prog"><b>${done} / ${tot}</b> (${pc} %)<span class="bar"><i style="width:${pc}%"></i></span></span>`);
+}
+function toggleCheckbox(box){
+  const n=S.cur;if(!n)return;
+  const k=[...pv.querySelectorAll('input[data-cb]')].indexOf(box);
+  const {L,res}=checkboxLines(n.text);if(k<0||k>=res.length)return renderPreview(true);
+  const i=res[k];L[i]=L[i].replace(CB_LINE,(m,pre,c)=>pre+(c===' '?'[x]':'[ ]'));
+  n.text=L.join('\n');const p=ta.selectionStart;ta.value=n.text;try{ta.setSelectionRange(p,p)}catch{}
+  n.dirty=true;setStatus('Sin guardar…');schedSave(n);renderPreview(true);
+}
 function renderPreview(force){
   const n=S.cur;if(!n)return;
   if(!force&&pv.querySelector('[data-ed]'))return; // no destruir una celda en edición
   const top=pv.scrollTop;
-  pv.innerHTML=renderMD(n.text,true);
+  pv.innerHTML=progressHTML(renderMD(n.text,true),n.text);
   pv.querySelectorAll('table[data-l] [data-c]').forEach(c=>c.contentEditable='true');
   pv.querySelectorAll('h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]').forEach(hd=>{const a=document.createElement('a');a.className='totop';a.title='Ir al principio de la página';hd.append(a)});
   decorate(pv);
@@ -1003,6 +1050,8 @@ function renderPreview(force){
   pv.scrollTop=top;
 }
 pv.addEventListener('click',async e=>{
+  const cbx=e.target.closest('input[data-cb]');
+  if(cbx){e.preventDefault();toggleCheckbox(cbx);return}
   if(e.target.closest('.totop')){pv.scrollTo({top:0,behavior:'smooth'});return}
   const ta_=e.target.closest('.toc a[data-h]');
   if(ta_){const t=pv.querySelector('#'+ta_.dataset.h);if(t)t.scrollIntoView({behavior:'smooth',block:'start'});return}
